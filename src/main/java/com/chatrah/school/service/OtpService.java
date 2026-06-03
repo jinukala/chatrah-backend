@@ -100,9 +100,11 @@ public class OtpService {
             throw new BadRequestException("Too many invalid attempts. Request a new OTP.");
         }
 
-        token.setAttempts(token.getAttempts() + 1);
-
         if (!token.getCode().equals(otp)) {
+            token.setAttempts(token.getAttempts() + 1);
+            if (token.getAttempts() >= token.getMaxAttempts()) {
+                token.setConsumed(true);
+            }
             throw new BadRequestException("Invalid OTP");
         }
 

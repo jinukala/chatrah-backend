@@ -123,14 +123,6 @@ public class User {
         this.id = id;
     }
 
-    public @NotNull Boolean getActive() {
-        return isActive;
-    }
-
-    public void setActive(@NotNull Boolean active) {
-        isActive = active;
-    }
-
     public String getUsername() { return username; }
 
     public void setUsername(String username) { this.username = username; }

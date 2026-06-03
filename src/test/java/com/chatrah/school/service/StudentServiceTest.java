@@ -53,7 +53,7 @@ public class StudentServiceTest {
         dto.setIsTransportUser(true);
         dto.setIitNeetOpted(false);
 
-        StudentDTO result = studentService.createOrUpdate(dto);
+        StudentDTO result = studentService.createOrUpdate(dto, "test", "TEST");
         assertNotNull(result.getId());
         assertEquals("Test Student", result.getName());
         assertEquals("10", result.getClassName());
@@ -112,7 +112,7 @@ public class StudentServiceTest {
         dto.setIsTransportUser(false);
         dto.setIitNeetOpted(true);
 
-        StudentDTO result = studentService.createOrUpdate(dto);
+        StudentDTO result = studentService.createOrUpdate(dto, "test", "TEST");
         assertEquals("Updated Student", result.getName());
         assertTrue(result.getIsHosteller());
         assertTrue(result.getIitNeetOpted());
@@ -135,7 +135,7 @@ public class StudentServiceTest {
     @Order(10)
     @Transactional
     void testDeleteStudent() {
-        studentService.delete(studentId);
+        studentService.delete(studentId, "test", "TEST");
         assertThrows(NotFoundException.class, () -> studentService.getById(studentId));
     }
 }

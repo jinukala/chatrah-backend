@@ -7,6 +7,7 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import java.util.List;
 
@@ -18,6 +19,9 @@ public class StudentResource {
     @Inject
     StudentService studentService;
 
+    @Inject
+    JsonWebToken jwt;
+
     @GET
     @RolesAllowed({SecurityRoles.PRINCIPAL, SecurityRoles.CLERK,
             SecurityRoles.TEACHER, SecurityRoles.SYS_ADMIN})
@@ -28,8 +32,10 @@ public class StudentResource {
                                             @QueryParam("sortBy") @DefaultValue("name") String sortBy,
                                             @QueryParam("sortDir") @DefaultValue("asc") String sortDir) {
         if (classId != null) {
-            List<StudentDTO> all = studentService.listByClass(classId);
-            return jakarta.ws.rs.core.Response.ok(all).header("X-Total-Count", all.size()).build();
+            List<StudentDTO> result = studentService.listFilteredByClass(classId, page, size, search, sortBy, sortDir);
+            long total = studentService.countFilteredByClass(classId, search);
+            return jakarta.ws.rs.core.Response.ok(result)
+                    .header("X-Total-Count", total).build();
         }
         List<StudentDTO> result = studentService.listFiltered(page, size, search, sortBy, sortDir);
         long total = studentService.countFiltered(search);
@@ -64,7 +70,7 @@ public class StudentResource {
     @POST
     @RolesAllowed({SecurityRoles.PRINCIPAL, SecurityRoles.CLERK, SecurityRoles.SYS_ADMIN, SecurityRoles.TEACHER})
     public StudentDTO create(StudentDTO dto) {
-        return studentService.createOrUpdate(dto);
+        return studentService.createOrUpdate(dto, jwt.getName(), jwt.getClaim("role"));
     }
 
     @PUT
@@ -72,13 +78,13 @@ public class StudentResource {
     @RolesAllowed({SecurityRoles.PRINCIPAL, SecurityRoles.CLERK, SecurityRoles.SYS_ADMIN, SecurityRoles.TEACHER})
     public StudentDTO update(@PathParam("id") Long id, StudentDTO dto) {
         dto.setId(id);
-        return studentService.createOrUpdate(dto);
+        return studentService.createOrUpdate(dto, jwt.getName(), jwt.getClaim("role"));
     }
 
     @DELETE
     @Path("/{id}")
     @RolesAllowed({SecurityRoles.PRINCIPAL, SecurityRoles.SYS_ADMIN})
     public void delete(@PathParam("id") Long id) {
-        studentService.delete(id);
+        studentService.delete(id, jwt.getName(), jwt.getClaim("role"));
     }
 }

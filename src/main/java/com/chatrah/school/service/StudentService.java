@@ -8,8 +8,6 @@ import com.chatrah.school.repository.ClassRoomRepository;
 import com.chatrah.school.repository.StudentRepository;
 import com.chatrah.school.repository.UserRepository;
 import com.chatrah.school.resource.AuditLogResource;
-import io.quarkus.cache.CacheInvalidate;
-import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -40,14 +38,41 @@ public class StudentService {
     @Inject
     com.chatrah.school.websocket.LiveEventService liveEventService;
 
-    @CacheInvalidate(cacheName = "fee-summary")
-    void invalidateFeeSummary(Long studentId) {
-        // no body needed
-    }
-
     public List<StudentDTO> listByClass(Long classId) {
         List<Student> students = studentRepository.findByClassRoomId(classId);
         return students.stream().map(this::toDTO).collect(Collectors.toList());
+    }
+
+    public List<StudentDTO> listFilteredByClass(Long classId, int page, int size, String search, String sortBy, String sortDir) {
+        boolean desc = "desc".equalsIgnoreCase(sortDir);
+        String dir = desc ? "DESC" : "ASC";
+        String order = "rollNo".equals(sortBy) ? "ORDER BY rollNo " + dir : "ORDER BY name " + dir;
+        String where = buildWhere(search);
+        if (where != null) {
+            Object[] p = buildParams(search);
+            // prepend classRoom condition — shift param indices
+            String fullWhere = "classRoom.id = ?1 AND (" + where.replace("?1", "?2").replace("?2", "?3") + ") " + order;
+            Object[] fullParams = prependParam(classId, p);
+            return studentRepository.find(fullWhere, fullParams).page(page, size).list().stream().map(this::toDTO).collect(Collectors.toList());
+        }
+        return studentRepository.find("classRoom.id = ?1 " + order, classId).page(page, size).list().stream().map(this::toDTO).collect(Collectors.toList());
+    }
+
+    public long countFilteredByClass(Long classId, String search) {
+        String where = buildWhere(search);
+        if (where != null) {
+            Object[] p = buildParams(search);
+            String fullWhere = "classRoom.id = ?1 AND (" + where.replace("?1", "?2").replace("?2", "?3") + ")";
+            return studentRepository.count(fullWhere, prependParam(classId, p));
+        }
+        return studentRepository.count("classRoom.id", classId);
+    }
+
+    private Object[] prependParam(Object first, Object[] rest) {
+        Object[] result = new Object[rest.length + 1];
+        result[0] = first;
+        System.arraycopy(rest, 0, result, 1, rest.length);
+        return result;
     }
 
     public List<StudentDTO> listAll() {
@@ -59,21 +84,58 @@ public class StudentService {
     }
 
     public List<StudentDTO> listFiltered(int page, int size, String search, String sortBy, String sortDir) {
-        io.quarkus.panache.common.Sort sort = "desc".equalsIgnoreCase(sortDir)
-                ? io.quarkus.panache.common.Sort.descending(sortBy)
-                : io.quarkus.panache.common.Sort.ascending(sortBy);
-        if (search != null && !search.isBlank()) {
-            return studentRepository.find("LOWER(name) LIKE ?1 OR CAST(rollNo AS string) LIKE ?1", sort, "%" + search.toLowerCase() + "%")
+        boolean desc = "desc".equalsIgnoreCase(sortDir);
+        String dir = desc ? "DESC" : "ASC";
+
+        // Build ORDER BY — numeric for rollNo, string for others; classRoom needs join alias
+        String order = switch (sortBy) {
+            case "rollNo"           -> "ORDER BY s.rollNo " + dir;
+            case "studentUniqueId"  -> "ORDER BY s.studentUniqueId " + dir;
+            case "classRoom"        -> "ORDER BY s.classRoom.className " + dir + ", s.classRoom.section " + dir;
+            default                 -> "ORDER BY s.name " + dir;
+        };
+
+        String where = buildWhere(search);
+        if (where != null) {
+            Object[] params = buildParams(search);
+            return studentRepository.find(where + " " + order, params)
                     .page(page, size).list().stream().map(this::toDTO).collect(Collectors.toList());
         }
+        // No search — use Panache sort (avoids manual JPQL for simple case)
+        var sort = desc ? io.quarkus.panache.common.Sort.descending("name") : io.quarkus.panache.common.Sort.ascending("name");
+        if ("rollNo".equals(sortBy)) sort = desc ? io.quarkus.panache.common.Sort.descending("rollNo") : io.quarkus.panache.common.Sort.ascending("rollNo");
+        else if ("studentUniqueId".equals(sortBy)) sort = desc ? io.quarkus.panache.common.Sort.descending("studentUniqueId") : io.quarkus.panache.common.Sort.ascending("studentUniqueId");
         return studentRepository.findAll(sort).page(page, size).list().stream().map(this::toDTO).collect(Collectors.toList());
     }
 
     public long countFiltered(String search) {
-        if (search != null && !search.isBlank()) {
-            return studentRepository.count("LOWER(name) LIKE ?1 OR CAST(rollNo AS string) LIKE ?1", "%" + search.toLowerCase() + "%");
-        }
+        String where = buildWhere(search);
+        if (where != null) return studentRepository.count(where, buildParams(search));
         return studentRepository.count();
+    }
+
+    /** Builds JPQL WHERE clause for search (name, rollNo, studentUniqueId). */
+    private String buildWhere(String search) {
+        if (search == null || search.isBlank()) return null;
+        String s = search.trim();
+        if (s.toUpperCase().startsWith("SVV")) {
+            return "UPPER(studentUniqueId) LIKE ?1";
+        }
+        if (s.matches("\\d+")) {
+            return "LOWER(name) LIKE ?1 OR rollNo = ?2";
+        }
+        return "LOWER(name) LIKE ?1";
+    }
+
+    private Object[] buildParams(String search) {
+        String s = search.trim();
+        if (s.toUpperCase().startsWith("SVV")) {
+            return new Object[]{"%" + s.toUpperCase() + "%"};
+        }
+        if (s.matches("\\d+")) {
+            return new Object[]{"%" + s.toLowerCase() + "%", Integer.parseInt(s)};
+        }
+        return new Object[]{"%" + s.toLowerCase() + "%"};
     }
 
     public long countAll() {
@@ -95,13 +157,29 @@ public class StudentService {
     }
 
     @Transactional
-    public StudentDTO createOrUpdate(StudentDTO dto) {
+    public StudentDTO createOrUpdate(StudentDTO dto, String performedBy, String role) {
         Student entity;
-        if (dto.getId() != null) {
+        boolean isNew = dto.getId() == null;
+        if (!isNew) {
             entity = studentRepository.findById(dto.getId());
             if (entity == null) throw new NotFoundException("Student not found");
         } else {
             entity = new Student();
+        }
+
+        // Capture changed fields before overwriting
+        List<String> changes = new java.util.ArrayList<>();
+        if (!isNew) {
+            if (!eq(entity.getName(), dto.getName())) changes.add("name");
+            if (!eq(entity.getEmail(), dto.getEmail())) changes.add("email");
+            if (!eq(entity.getParentMobile(), dto.getParentMobile())) changes.add("mobile");
+            if (!eq(entity.getGender(), dto.getGender())) changes.add("gender");
+            if (!eq(entity.getFatherName(), dto.getFatherName())) changes.add("fatherName");
+            if (!eq(entity.getMotherName(), dto.getMotherName())) changes.add("motherName");
+            if (!eq(entity.getAddress(), dto.getAddress())) changes.add("address");
+            if (!java.util.Objects.equals(entity.getRollNo(), dto.getRollNo())) changes.add("rollNo");
+            Long currentClassId = entity.getClassRoom() != null ? entity.getClassRoom().getId() : null;
+            if (!java.util.Objects.equals(currentClassId, dto.getClassId())) changes.add("class");
         }
 
         entity.setName(dto.getName());
@@ -131,6 +209,7 @@ public class StudentService {
         }
 
         studentRepository.persist(entity);
+        studentRepository.flush();
 
         // Auto-generate studentUniqueId: SVV + class(2) + section(1) + roll(3)
         if (entity.getStudentUniqueId() == null && entity.getClassRoom() != null && entity.getRollNo() != null) {
@@ -141,15 +220,24 @@ public class StudentService {
         }
 
         // Auto-create login account for new students
-        if (dto.getId() == null) {
+        if (isNew) {
             createStudentUser(entity);
-            auditService.log("CREATED", "Student", String.valueOf(entity.getId()), "New student: " + entity.getName(), "system", "SYSTEM");
+            String desc = "Added student " + entity.getName() + " by " + performedBy + " (" + role + ")";
+            auditService.log("CREATED", "Student", String.valueOf(entity.getId()), desc, performedBy, role);
             liveEventService.studentCreated(entity.getName());
         } else {
-            auditService.log("UPDATED", "Student", String.valueOf(entity.getId()), "Updated: " + entity.getName(), "system", "SYSTEM");
+            String what = changes.isEmpty() ? "no field changes" : String.join(", ", changes);
+            String desc = "Updated " + what + " of " + entity.getName() + " by " + performedBy + " (" + role + ")";
+            auditService.log("UPDATED", "Student", String.valueOf(entity.getId()), desc, performedBy, role);
         }
 
         return toDTO(entity);
+    }
+
+    private boolean eq(Object a, Object b) {
+        String sa = a == null ? "" : a.toString().trim();
+        String sb = b == null ? "" : b.toString().trim();
+        return sa.equals(sb);
     }
 
     private void createStudentUser(Student student) {
@@ -173,9 +261,13 @@ public class StudentService {
     }
 
     @Transactional
-    public void delete(Long id) {
+    public void delete(Long id, String performedBy, String role) {
         Student s = studentRepository.findById(id);
-        if (s != null) studentRepository.delete(s);
+        if (s != null) {
+            auditService.log("DELETED", "Student", String.valueOf(id),
+                "Deleted student " + s.getName() + " by " + performedBy + " (" + role + ")", performedBy, role);
+            studentRepository.delete(s);
+        }
     }
 
     private StudentDTO toDTO(Student s) {

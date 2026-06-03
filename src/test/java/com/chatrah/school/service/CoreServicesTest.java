@@ -61,7 +61,7 @@ public class CoreServicesTest {
         dto.setMobile("9876500000");
         dto.setEmail("teacher@test.com");
         dto.setClassTeacherOfId(classId);
-        TeacherDTO result = teacherService.createOrUpdate(dto);
+        TeacherDTO result = teacherService.createOrUpdate(dto, "test", "TEST");
         assertNotNull(result.getId());
         assertEquals("Test Teacher", result.getName());
         teacherId = result.getId();
@@ -121,7 +121,7 @@ public class CoreServicesTest {
     @Test
     @Order(8)
     void testRecordPayment() {
-        var summary = feeService.recordManualPayment(studentId, 10000, "CASH", "Test payment");
+        var summary = feeService.recordManualPayment(studentId, 10000, "CASH", "Test payment", "test", "TEST");
         assertEquals(10000, summary.getTotalPaid());
         assertEquals(55000, summary.getDue());
     }
@@ -129,7 +129,7 @@ public class CoreServicesTest {
     @Test
     @Order(9)
     void testRecordSecondPayment() {
-        var summary = feeService.recordManualPayment(studentId, 25000, "UPI", null);
+        var summary = feeService.recordManualPayment(studentId, 25000, "UPI", null, "test", "TEST");
         assertEquals(35000, summary.getTotalPaid());
         assertEquals(30000, summary.getDue());
     }

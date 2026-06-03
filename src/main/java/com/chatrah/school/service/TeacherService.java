@@ -7,26 +7,24 @@ import com.chatrah.school.entity.User;
 import com.chatrah.school.repository.ClassRoomRepository;
 import com.chatrah.school.repository.TeacherRepository;
 import com.chatrah.school.repository.UserRepository;
+import com.chatrah.school.resource.AuditLogResource;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.NotFoundException;
 import org.mindrot.jbcrypt.BCrypt;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class TeacherService {
 
-    @Inject
-    TeacherRepository teacherRepository;
-
-    @Inject
-    ClassRoomRepository classRoomRepository;
-
-    @Inject
-    UserRepository userRepository;
+    @Inject TeacherRepository teacherRepository;
+    @Inject ClassRoomRepository classRoomRepository;
+    @Inject UserRepository userRepository;
+    @Inject AuditLogResource.AuditService auditService;
 
     public List<TeacherDTO> listAll() {
         return teacherRepository.listAll().stream().map(this::toDTO).collect(Collectors.toList());
@@ -39,13 +37,25 @@ public class TeacherService {
     }
 
     @Transactional
-    public TeacherDTO createOrUpdate(TeacherDTO dto) {
+    public TeacherDTO createOrUpdate(TeacherDTO dto, String performedBy, String role) {
         Teacher t;
-        if (dto.getId() != null) {
+        boolean isNew = dto.getId() == null;
+        if (!isNew) {
             t = teacherRepository.findById(dto.getId());
             if (t == null) throw new NotFoundException("Teacher not found");
         } else {
             t = new Teacher();
+        }
+
+        // Capture changes before overwriting
+        List<String> changes = new ArrayList<>();
+        if (!isNew) {
+            if (!eq(t.getName(), dto.getName())) changes.add("name");
+            if (!eq(t.getEmail(), dto.getEmail())) changes.add("email");
+            if (!eq(t.getMobile(), dto.getMobile())) changes.add("mobile");
+            if (!eq(t.getSubject(), dto.getSubject())) changes.add("subject");
+            if (!eq(t.getQualification(), dto.getQualification())) changes.add("qualification");
+            if (!java.util.Objects.equals(t.getSalary(), dto.getSalary())) changes.add("salary");
         }
 
         t.setName(dto.getName());
@@ -60,12 +70,16 @@ public class TeacherService {
 
         teacherRepository.persist(t);
 
-        // Auto-create login account for new teachers
-        if (dto.getId() == null) {
+        if (isNew) {
             createTeacherUser(t);
+            auditService.log("CREATED", "Teacher", String.valueOf(t.getId()),
+                "Added teacher " + t.getName() + " by " + performedBy + " (" + role + ")", performedBy, role);
+        } else {
+            String what = changes.isEmpty() ? "details" : String.join(", ", changes);
+            auditService.log("UPDATED", "Teacher", String.valueOf(t.getId()),
+                "Updated " + what + " of " + t.getName() + " by " + performedBy + " (" + role + ")", performedBy, role);
         }
 
-        // Assign as class teacher if specified
         if (dto.getClassTeacherOfId() != null) {
             ClassRoom cr = classRoomRepository.findById(dto.getClassTeacherOfId());
             if (cr != null) {
@@ -78,9 +92,19 @@ public class TeacherService {
     }
 
     @Transactional
-    public void delete(Long id) {
+    public void delete(Long id, String performedBy, String role) {
         Teacher t = teacherRepository.findById(id);
-        if (t != null) teacherRepository.delete(t);
+        if (t != null) {
+            auditService.log("DELETED", "Teacher", String.valueOf(id),
+                "Deleted teacher " + t.getName() + " by " + performedBy + " (" + role + ")", performedBy, role);
+            teacherRepository.delete(t);
+        }
+    }
+
+    private boolean eq(Object a, Object b) {
+        String sa = a == null ? "" : a.toString().trim();
+        String sb = b == null ? "" : b.toString().trim();
+        return sa.equals(sb);
     }
 
     private void createTeacherUser(Teacher teacher) {

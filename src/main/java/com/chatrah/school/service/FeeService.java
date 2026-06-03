@@ -60,6 +60,7 @@ public class FeeService {
      * due = totalFee - totalPaid
      */
     @Transactional
+    @CacheResult(cacheName = "fee-summary")
     public FeeSummaryDTO computeFeeSummary(Long studentId) {
         Student student = studentRepository.findById(studentId);
         if (student == null) throw new NotFoundException("Student not found");
@@ -139,7 +140,7 @@ public class FeeService {
     }
 
     @Transactional
-    public FeeSummaryDTO recordManualPayment(Long studentId, int amount, String mode, String remarks) {
+    public FeeSummaryDTO recordManualPayment(Long studentId, int amount, String mode, String remarks, String performedBy, String role) {
         Student student = studentRepository.findById(studentId);
         if (student == null) throw new NotFoundException("Student not found");
 
@@ -152,7 +153,7 @@ public class FeeService {
         payment.setTransactionId("MANUAL-" + java.util.UUID.randomUUID().toString().substring(0, 8));
         payment.setReceiptNo("RCP-" + System.currentTimeMillis());
         feePaymentRepository.persist(payment);
-        auditService.log("CREATED", "Payment", String.valueOf(payment.getId()), "Payment ₹" + amount + " for " + student.getName() + " via " + mode, "system", "SYSTEM");
+        auditService.log("CREATED", "Payment", String.valueOf(payment.getId()), "Payment ₹" + amount + " for " + student.getName() + " via " + mode + " by " + performedBy + " (" + role + ")", performedBy, role);
         liveEventService.paymentRecorded(student.getName(), amount);
 
         invalidateFeeSummary(studentId);

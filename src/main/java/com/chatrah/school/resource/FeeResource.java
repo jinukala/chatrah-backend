@@ -127,7 +127,7 @@ public class FeeResource {
         int amount = ((Number) body.get("amount")).intValue();
         String mode = body.get("mode") != null ? body.get("mode").toString() : "CASH";
         String remarks = body.get("remarks") != null ? body.get("remarks").toString() : null;
-        return feeService.recordManualPayment(studentId, amount, mode, remarks);
+        return feeService.recordManualPayment(studentId, amount, mode, remarks, jwt.getName(), jwt.getClaim("role"));
     }
 
     /**

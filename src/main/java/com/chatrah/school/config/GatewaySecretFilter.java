@@ -24,7 +24,8 @@ public class GatewaySecretFilter implements ContainerRequestFilter {
     public void filter(ContainerRequestContext ctx) {
         // Allow health/readiness probes
         String path = ctx.getUriInfo().getPath();
-        if (path.startsWith("q/") || path.equals("health") || path.equals("ready")) {
+        if (path.startsWith("/q/") || path.equals("/health") || path.equals("/ready")
+                || path.startsWith("q/") || path.equals("health") || path.equals("ready")) {
             return;
         }
 

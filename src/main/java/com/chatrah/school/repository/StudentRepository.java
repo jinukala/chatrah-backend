@@ -24,6 +24,6 @@ public class StudentRepository implements PanacheRepository<Student> {
      * List all students by classRoomId (helper when only ID is known).
      */
     public List<Student> findByClassRoomId(Long classRoomId) {
-        return list("classRoom.id", classRoomId);
+        return list("classRoom.id = ?1 ORDER BY rollNo ASC", classRoomId);
     }
 }
